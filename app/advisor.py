@@ -71,20 +71,52 @@ Jika tidak yakin antara 1 dan 3, tanya balik dengan ramah."""
 
 # ── Keyword detector — apakah perlu data Sheet? ────────
 SHEET_KEYWORDS = [
-    "bulan lalu", "tahun lalu", "tahun ini", "historis", "tren",
-    "bandingkan", "perbandingan", "rata-rata", "total", "paling",
-    "tertinggi", "terendah", "boros", "hemat", "meningkat", "menurun",
-    "2023", "2024", "2025", "2026", "sejak", "selama", "sepanjang",
+    # Waktu
+    "bulan lalu", "tahun lalu", "tahun ini", "bulan terakhir", "bulan ini",
+    "2 bulan", "3 bulan", "6 bulan", "12 bulan", "sejak", "selama", "sepanjang",
+    "2023", "2024", "2025", "2026",
     "januari", "februari", "maret", "april", "mei", "juni",
     "juli", "agustus", "september", "oktober", "november", "desember",
-    "berapa bulan", "kapan", "progress", "perkembangan", "summary",
-    "rekap", "evaluasi", "gimana kondisi", "kondisi keuangan",
-    "tiwi", "al riefqy", "mama", "shanaya", "haji", "pensiun", "bibit"
+    # Analisis
+    "historis", "tren", "trend", "bandingkan", "perbandingan", "rata-rata",
+    "total", "paling", "tertinggi", "terendah", "boros", "hemat",
+    "meningkat", "menurun", "naik", "turun", "progress", "perkembangan",
+    "berapa bulan", "kapan", "summary", "rekap", "evaluasi",
+    # Pertanyaan keuangan umum yang butuh data
+    "kondisi keuangan", "gimana kondisi", "gimana keuangan",
+    "alokasi", "budget", "pengeluaran", "pemasukan", "tabungan",
+    "nabung", "saving", "gaji", "sisa", "cashflow",
+    # Anggota keluarga
+    "tiwi", "al riefqy", "mama", "shanaya", "tante", "rian",
+    # Pos keuangan
+    "haji", "pensiun", "darurat", "renovasi", "liburan", "bibit",
+    "cicilan", "listrik", "wifi", "transport",
+    # Pertanyaan rekomendasi yang butuh konteks
+    "boleh beli", "bisa beli", "mampu beli", "sanggup",
+    "berapa lagi", "target", "kapan bisa",
 ]
 
 def needs_sheet_data(text: str) -> bool:
-    text_lower = text.lower()
-    return any(kw in text_lower for kw in SHEET_KEYWORDS)
+    """
+    Selalu tarik Sheet kecuali pesan sangat pendek (salam/transaksi singkat).
+    Lebih baik punya konteks historis daripada tidak.
+    """
+    text_lower = text.lower().strip()
+    words = text_lower.split()
+
+    # Pesan 1-2 kata → tidak perlu Sheet (salam, command pendek)
+    if len(words) <= 2:
+        return False
+
+    # Pesan yang jelas transaksi (ada angka + kata beli/bayar)
+    has_number = any(c.isdigit() for c in text)
+    transaction_words = ["beli", "bayar", "beli", "terima", "gaji masuk",
+                          "transfer", "tarik", "setor", "rb", "ribu", "juta"]
+    if has_number and any(w in text_lower for w in transaction_words):
+        return False
+
+    # Semua pertanyaan lain → tarik Sheet
+    return True
 
 
 # ── Cache helper ───────────────────────────────────────
@@ -96,10 +128,14 @@ def get_cached_sheet_data():
     try:
         from app.sheets import get_all_sheet_data
         data = get_all_sheet_data()
-        _sheet_cache = {"data": data, "ts": now}
+        if data:
+            _sheet_cache = {"data": data, "ts": now}
+            print(f"✅ Sheet loaded: {len(data)} bulan")
+        else:
+            print("⚠️ Sheet returned empty data")
         return data, False
     except Exception as e:
-        print(f"Sheet cache error: {e}")
+        print(f"❌ Sheet cache error: {type(e).__name__}: {e}")
         return [], False
 
 

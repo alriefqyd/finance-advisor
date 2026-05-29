@@ -347,6 +347,41 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 
+async def debug_sheet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Test koneksi Google Sheet — hanya untuk debugging."""
+    if not allowed(update): return
+    await update.message.chat.send_action("typing")
+
+    lines = ["🔍 Debug Google Sheet:\n"]
+
+    # Cek environment variables
+    sheet_id = os.getenv("GOOGLE_SHEET_ID", "")
+    creds    = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+    lines.append(f"GOOGLE_SHEET_ID: {'✅ Ada' if sheet_id else '❌ KOSONG'}")
+    lines.append(f"GOOGLE_CREDENTIALS_JSON: {'✅ Ada' if creds else '❌ KOSONG'}")
+
+    if not sheet_id or not creds:
+        await update.message.reply_text("\n".join(lines))
+        return
+
+    # Coba koneksi ke Sheet
+    try:
+        from app.sheets import get_all_sheet_data
+        data = get_all_sheet_data()
+        if data:
+            lines.append(f"\n✅ Sheet terbaca: {len(data)} bulan data")
+            lines.append(f"Bulan pertama: {data[0]['bulan']}")
+            lines.append(f"Bulan terakhir: {data[-1]['bulan']}")
+        else:
+            lines.append("\n⚠️ Sheet terbuka tapi data kosong")
+            lines.append("Cek apakah nama tab Sheet adalah '📥 Data'")
+    except Exception as e:
+        lines.append(f"\n❌ Error koneksi: {type(e).__name__}")
+        lines.append(str(e)[:200])
+
+    await update.message.reply_text("\n".join(lines))
+
+
 async def cek_email(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Cek email pending yang belum diproses."""
     if not allowed(update): return
@@ -538,6 +573,7 @@ def main():
     app.add_handler(CommandHandler("setmember",      set_member))
     app.add_handler(CommandHandler("rekap",          rekap_sheet))
     app.add_handler(CommandHandler("cek_email",      cek_email))
+    app.add_handler(CommandHandler("debug_sheet",    debug_sheet))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("🤖 Fin Finance Bot berjalan...")
