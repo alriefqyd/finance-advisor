@@ -280,7 +280,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Show typing indicator
     await update.message.chat.send_action("typing")
 
-    # Try to parse as transaction
+    # Try to parse as transaction first
     parsed = parse_transaction(text)
     if parsed:
         add_transaction(
@@ -305,26 +305,159 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 if b["category"] == parsed["category"] and b["limit_amount"] > 0:
                     pct = b["spent"] / b["limit_amount"] * 100
                     if pct > 100:
-                        warning = f"\n\n⚠️ *Budget {parsed['category']} sudah melebihi limit!* ({pct:.0f}%)"
+                        warning = f"\n⚠️ Budget {parsed['category']} sudah melebihi limit! ({pct:.0f}%)"
                     elif pct > 80:
-                        warning = f"\n\n🔴 Budget *{parsed['category']}* hampir habis ({pct:.0f}%)"
+                        warning = f"\n🔴 Budget {parsed['category']} hampir habis ({pct:.0f}%)"
+
+        # Tulis ke Google Sheet jika expense
+        sheet_note = ""
+        if parsed["type"] == "expense" and os.getenv("GOOGLE_SHEET_ID"):
+            try:
+                from app.sheets import write_transaction_to_sheet
+                member = ctx.user_data.get("member", "al_riefqy")
+                ok, pos = write_transaction_to_sheet(parsed, uid, member)
+                if ok:
+                    sheet_note = f"\n📊 Sheet: pos {pos}"
+            except Exception as ex:
+                sheet_note = f"\n⚠️ Sheet: {str(ex)[:40]}"
 
         await update.message.reply_text(
             f"{e} Tercatat!\n\n"
-            f"*{t}*: {fmt_rp(parsed['amount'])}\n"
+            f"{t}: {fmt_rp(parsed['amount'])}\n"
             f"Kategori: {parsed['category']}\n"
-            f"Keterangan: {parsed['description']}{warning}",
-            parse_mode="Markdown"
+            f"Keterangan: {parsed['description']}"
+            f"{sheet_note}{warning}",
         )
         return
 
-    # Otherwise, treat as advice/question
+    # Not a transaction — use smart process_message (auto-detect sheet/model)
+    from app.advisor import process_message, needs_sheet_data
     summary = get_summary(uid, current_month())
     budgets = get_budget_usage(uid, current_month())
     bills   = get_bills(uid)
+    monthly_ctx = {"summary": summary, "budgets": budgets, "bills": bills,
+                   "month": datetime.now().strftime("%B %Y")}
 
-    reply = get_advice(text, summary, budgets, bills)
-    await update.message.reply_text(reply, parse_mode="Markdown")
+    reply, model_used = process_message(text, monthly_context=monthly_ctx)
+
+    # Tambah footer info model jika pakai Sonnet (biaya lebih tinggi)
+    if "sonnet" in model_used:
+        reply += "\n\n_🔍 Analisis mendalam (Sonnet)_"
+
+    await update.message.reply_text(reply)
+
+
+async def cek_email(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Cek email pending yang belum diproses."""
+    if not allowed(update): return
+    from app.webhook_server import get_pending_emails
+    from app.database import add_transaction
+    from app.sheets import write_transaction_to_sheet
+
+    pending = get_pending_emails()
+    if not pending:
+        await update.message.reply_text("📭 Tidak ada email transaksi baru.")
+        return
+
+    results = []
+    for email in pending:
+        if email.get("type") == "info":
+            results.append(f"ℹ️ {email['description']}")
+            continue
+
+        if email.get("amount", 0) > 0:
+            # Simpan ke database
+            add_transaction(
+                str(update.effective_user.id),
+                email["amount"],
+                email["type"],
+                email["category"],
+                email["description"],
+            )
+            # Tulis ke Sheet
+            sheet_note = ""
+            if os.getenv("GOOGLE_SHEET_ID"):
+                try:
+                    member = "al_riefqy"
+                    ok, pos = write_transaction_to_sheet(email, str(update.effective_user.id), member)
+                    if ok:
+                        sheet_note = f" → Sheet: {pos}"
+                except:
+                    pass
+
+            emoji = "💚" if email["type"] == "income" else ("💙" if email["type"] == "investment" else "❤️")
+            results.append(
+                f"{emoji} {email['description']}\n"
+                f"   Rp{email['amount']:,.0f} ({email['category']}){sheet_note}"
+            )
+
+    text = f"📧 {len(pending)} email diproses:\n\n" + "\n\n".join(results)
+    await update.message.reply_text(text)
+
+
+async def set_member(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Set anggota keluarga untuk transaksi berikutnya. /setmember tiwi"""
+    if not allowed(update): return
+    valid = ["tiwi", "al_riefqy", "mama", "shanaya", "tante", "rian"]
+    if not ctx.args:
+        current = ctx.user_data.get("member", "al_riefqy")
+        await update.message.reply_text(
+            f"Member aktif: {current}\n\n"
+            f"Ganti dengan: /setmember [nama]\n"
+            f"Pilihan: {', '.join(valid)}"
+        )
+        return
+    member = ctx.args[0].lower().replace(" ", "_")
+    if member not in valid:
+        await update.message.reply_text(f"Member tidak valid. Pilihan: {', '.join(valid)}")
+        return
+    ctx.user_data["member"] = member
+    await update.message.reply_text(
+        f"✅ Member diset ke: {member}\n"
+        f"Semua transaksi berikutnya akan dicatat ke pos {member} di Sheet."
+    )
+
+
+async def rekap_sheet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Rekap transaksi bulan ini ke tab Data. /rekap atau /rekap May 2026"""
+    if not allowed(update): return
+    bulan = " ".join(ctx.args) if ctx.args else datetime.now().strftime("%b %Y")
+    await update.message.chat.send_action("typing")
+    try:
+        from app.sheets import rekap_bulan_ke_data
+        ok, msg = rekap_bulan_ke_data(bulan)
+        await update.message.reply_text(msg)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+async def tanya_sheet(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Tanya apapun tentang data historis Google Sheet."""
+    if not allowed(update): return
+
+    pertanyaan = " ".join(ctx.args) if ctx.args else ""
+    if not pertanyaan:
+        await update.message.reply_text(
+            "Contoh penggunaan:\n"
+            "/tanya bulan mana pengeluaran paling boros?\n"
+            "/tanya bandingkan nabung tahun 2024 vs 2025\n"
+            "/tanya tren pengeluaran al riefqy 6 bulan terakhir\n"
+            "/tanya total pengeluaran mama tahun 2025"
+        )
+        return
+
+    await update.message.chat.send_action("typing")
+    try:
+        from app.sheets import get_all_sheet_data
+        from app.advisor import ask_claude_with_sheet
+        data = get_all_sheet_data()
+        if not data:
+            await update.message.reply_text("❌ Gagal membaca data dari Google Sheet.")
+            return
+        reply = ask_claude_with_sheet(pertanyaan, data)
+        await update.message.reply_text(reply)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
 
 # ── Google Sheet Commands ──────────────────────────────
@@ -401,11 +534,36 @@ def main():
     app.add_handler(CommandHandler("tagihan_list",   list_tagihan))
     app.add_handler(CommandHandler("sheet_budget",   sheet_budget))
     app.add_handler(CommandHandler("sheet_rekap",    sheet_rekap))
+    app.add_handler(CommandHandler("tanya",          tanya_sheet))
+    app.add_handler(CommandHandler("setmember",      set_member))
+    app.add_handler(CommandHandler("rekap",          rekap_sheet))
+    app.add_handler(CommandHandler("cek_email",      cek_email))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("🤖 Fin Finance Bot berjalan...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    # Jalankan webhook server paralel di port 8080
+    import asyncio
+    from aiohttp import web as aiohttp_web
+    from app.webhook_server import create_app as create_webhook_app
+
+    async def run_both():
+        webhook_app = create_webhook_app()
+        runner = aiohttp_web.AppRunner(webhook_app)
+        await runner.setup()
+        site = aiohttp_web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+        await site.start()
+        logger.info("🌐 Webhook server berjalan di port 8080")
+        # Jalankan polling bot
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        # Tunggu selamanya
+        await asyncio.Event().wait()
+
+    asyncio.run(run_both())
 
 
 if __name__ == "__main__":
     main()
+
