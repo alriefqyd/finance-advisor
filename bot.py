@@ -344,6 +344,8 @@ def main():
     app.add_handler(CommandHandler("cekbudget",      cek_budget))
     app.add_handler(CommandHandler("tagihan",        tambah_tagihan))
     app.add_handler(CommandHandler("tagihan_list",   list_tagihan))
+    app.add_handler(CommandHandler("sheet_budget",   sheet_budget))
+    app.add_handler(CommandHandler("sheet_rekap",    sheet_rekap))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("🤖 Fin Finance Bot berjalan...")
