@@ -340,23 +340,26 @@ async def sheet_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Gagal membaca Google Sheet. Pastikan GOOGLE_CREDENTIALS_JSON dan GOOGLE_SHEET_ID sudah diset.")
             return
 
-        text = f"📊 *Data Bulan: {data['bulan']}*\n\n"
-        text += f"💰 Gaji: *{fmt_rp(data['gaji'])}*\n"
-        text += f"🏦 Tabungan: *{fmt_rp(data['total_tabungan'])}*\n"
-        text += f"🛒 Pengeluaran: *{fmt_rp(data['total_pengeluaran'])}*\n"
-        text += f"📈 % Nabung: *{data['pct_nabung']*100:.1f}%*\n\n"
-
-        text += "*Alokasi Tabungan:*\n"
+        # Gunakan plain text tanpa Markdown untuk hindari parse error
+        lines = []
+        lines.append(f"📊 Data Bulan: {data['bulan']}")
+        lines.append("")
+        lines.append(f"💰 Gaji         : {fmt_rp(data['gaji'])}")
+        lines.append(f"🏦 Tabungan     : {fmt_rp(data['total_tabungan'])}")
+        lines.append(f"🛒 Pengeluaran  : {fmt_rp(data['total_pengeluaran'])}")
+        lines.append(f"📈 Nabung       : {data['pct_nabung']*100:.1f}%")
+        lines.append("")
+        lines.append("── Alokasi Tabungan ──")
         for k, v in data['tabungan'].items():
             if v > 0:
-                text += f"  • {k}: {fmt_rp(v)}\n"
-
-        text += "\n*Pengeluaran per Pos:*\n"
+                lines.append(f"  {k:<12}: {fmt_rp(v)}")
+        lines.append("")
+        lines.append("── Pengeluaran per Pos ──")
         for k, v in data['pengeluaran'].items():
             if v > 0:
-                text += f"  • {k}: {fmt_rp(v)}\n"
+                lines.append(f"  {k:<12}: {fmt_rp(v)}")
 
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text("\n".join(lines))
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
