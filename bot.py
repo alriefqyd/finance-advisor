@@ -327,6 +327,58 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply, parse_mode="Markdown")
 
 
+# ── Google Sheet Commands ──────────────────────────────
+async def sheet_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Baca budget bulan terakhir dari Google Sheet."""
+    if not allowed(update): return
+    await update.message.chat.send_action("typing")
+
+    try:
+        from app.sheets import get_budget_from_sheet
+        data = get_budget_from_sheet()
+        if not data:
+            await update.message.reply_text("❌ Gagal membaca Google Sheet. Pastikan GOOGLE_CREDENTIALS_JSON dan GOOGLE_SHEET_ID sudah diset.")
+            return
+
+        text = f"📊 *Data Bulan: {data['bulan']}*\n\n"
+        text += f"💰 Gaji: *{fmt_rp(data['gaji'])}*\n"
+        text += f"🏦 Tabungan: *{fmt_rp(data['total_tabungan'])}*\n"
+        text += f"🛒 Pengeluaran: *{fmt_rp(data['total_pengeluaran'])}*\n"
+        text += f"📈 % Nabung: *{data['pct_nabung']*100:.1f}%*\n\n"
+
+        text += "*Alokasi Tabungan:*\n"
+        for k, v in data['tabungan'].items():
+            if v > 0:
+                text += f"  • {k}: {fmt_rp(v)}\n"
+
+        text += "\n*Pengeluaran per Pos:*\n"
+        for k, v in data['pengeluaran'].items():
+            if v > 0:
+                text += f"  • {k}: {fmt_rp(v)}\n"
+
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+async def sheet_rekap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Panduan rekap bulanan ke Google Sheet."""
+    if not allowed(update): return
+
+    bulan = datetime.now().strftime("%b %Y")
+    text = (
+        f"📝 *Rekap Bulanan ke Google Sheet*\n\n"
+        f"Untuk input data {bulan} ke Sheet, kirim pesan dengan format:\n\n"
+        f"`/input_bulan`\n\n"
+        f"Bot akan tanya satu per satu:\n"
+        f"1. Gaji bulan ini\n"
+        f"2. Total tabungan & rinciannya\n"
+        f"3. Total pengeluaran & rinciannya\n\n"
+        f"Atau kamu bisa langsung input manual di Google Sheet seperti biasa."
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
 # ── App Entry ──────────────────────────────────────────
 def main():
     init_db()
@@ -354,55 +406,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# ── Google Sheet Commands ──────────────────────────────
-async def sheet_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Baca budget bulan terakhir dari Google Sheet."""
-    if not allowed(update): return
-    await update.message.chat.send_action("typing")
-    
-    try:
-        from app.sheets import get_budget_from_sheet
-        data = get_budget_from_sheet()
-        if not data:
-            await update.message.reply_text("❌ Gagal membaca Google Sheet. Pastikan GOOGLE_CREDENTIALS_JSON dan GOOGLE_SHEET_ID sudah diset.")
-            return
-        
-        text = f"📊 *Data Bulan: {data['bulan']}*\n\n"
-        text += f"💰 Gaji: *{fmt_rp(data['gaji'])}*\n"
-        text += f"🏦 Tabungan: *{fmt_rp(data['total_tabungan'])}*\n"
-        text += f"🛒 Pengeluaran: *{fmt_rp(data['total_pengeluaran'])}*\n"
-        text += f"📈 % Nabung: *{data['pct_nabung']*100:.1f}%*\n\n"
-        
-        text += "*Alokasi Tabungan:*\n"
-        for k, v in data['tabungan'].items():
-            if v > 0:
-                text += f"  • {k}: {fmt_rp(v)}\n"
-        
-        text += "\n*Pengeluaran per Pos:*\n"
-        for k, v in data['pengeluaran'].items():
-            if v > 0:
-                text += f"  • {k}: {fmt_rp(v)}\n"
-        
-        await update.message.reply_text(text, parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
-
-async def sheet_rekap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Panduan rekap bulanan ke Google Sheet."""
-    if not allowed(update): return
-    
-    bulan = datetime.now().strftime("%b %Y")
-    text = (
-        f"📝 *Rekap Bulanan ke Google Sheet*\n\n"
-        f"Untuk input data {bulan} ke Sheet, kirim pesan dengan format:\n\n"
-        f"`/input_bulan`\n\n"
-        f"Bot akan tanya satu per satu:\n"
-        f"1. Gaji bulan ini\n"
-        f"2. Total tabungan & rinciannya\n"
-        f"3. Total pengeluaran & rinciannya\n\n"
-        f"Atau kamu bisa langsung input manual di Google Sheet seperti biasa."
-    )
-    await update.message.reply_text(text, parse_mode="Markdown")
